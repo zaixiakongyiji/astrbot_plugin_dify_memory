@@ -1,0 +1,5 @@
+name: astrbot_plugin_dify_memory
+desc: 基于 Dify 云端知识库的跨群用户级长期记忆插件，支持每 N 轮对话后台调用 AstrBot 模型自动总结归档与混合检索注入。
+version: 1.0.1
+author: zaixiakongyiji
+repo: https://github.com/zaixiakongyiji/astrbot_plugin_dify_memory

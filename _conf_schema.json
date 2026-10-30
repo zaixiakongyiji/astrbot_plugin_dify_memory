@@ -1,0 +1,71 @@
+{
+  "dify_base_url": {
+    "description": "Dify API 基础地址",
+    "type": "string",
+    "default": "https://api.dify.ai/v1",
+    "hint": "Dify 官方云端默认填 https://api.dify.ai/v1，私有部署请填对应的 /v1 地址"
+  },
+  "dify_dataset_api_key": {
+    "description": "Dify 知识库 API Key",
+    "type": "string",
+    "default": "",
+    "secret": true,
+    "hint": "在 Dify 知识库页面 -> API 访问 中生成的 Dataset 专用密钥（dataset-...）"
+  },
+  "dify_dataset_id": {
+    "description": "Dify 知识库 Dataset ID",
+    "type": "string",
+    "default": "",
+    "hint": "目标【经典知识库】的 UUID（注意：必须为经典知识库，不支持智能体知识库），可在知识库 URL 或 API 文档中查看"
+  },
+  "summary_provider_id": {
+    "description": "后台记忆总结专用模型提供商",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider",
+    "hint": "可选。留空则默认复用当前对话正在使用的模型提供商"
+  },
+  "summary_turns": {
+    "description": "自动总结触发轮数（N 轮）",
+    "type": "int",
+    "default": 10,
+    "hint": "同一用户累计多少轮对话后在后台触发一次自动总结并归档至 Dify"
+  },
+  "retrieve_top_k": {
+    "description": "记忆检索候选条数（Top K）",
+    "type": "int",
+    "default": 5,
+    "hint": "每次对话前从 Dify 知识库检索并返回的最大候选分段数"
+  },
+  "score_threshold": {
+    "description": "检索相似度阈值",
+    "type": "float",
+    "default": 0.45,
+    "hint": "0~1 之间，低于该分数的不相关记忆将被过滤"
+  },
+  "search_method": {
+    "description": "Dify 检索模式",
+    "type": "string",
+    "default": "dataset_default",
+    "options": [
+      "dataset_default",
+      "hybrid_search",
+      "semantic_search",
+      "keyword_search",
+      "full_text_search"
+    ],
+    "hint": "推荐使用 dataset_default（直接沿用你在 Dify 知识库 WebUI 中配置的混合检索、Rerank 模型与权重）；若显式指定其他项则会覆盖云端检索方式且不启用云端 Rerank"
+  },
+  "min_query_length": {
+    "description": "触发记忆检索的最小消息字数",
+    "type": "int",
+    "default": 2,
+    "hint": "短于该字数的消息（如单字、纯标点）跳过 Dify 检索以节省延迟，但仍计入对话缓冲"
+  },
+  "request_timeout": {
+    "description": "Dify API 请求超时时间（秒）",
+    "type": "int",
+    "default": 15,
+    "hint": "请求 Dify 知识库接口的超时秒数"
+  }
+}
