@@ -20,6 +20,8 @@ from astrbot_plugin_dify_memory.dify_client import (
     strip_memory_prefix,
 )
 from astrbot_plugin_dify_memory.main import (
+    DEFAULT_SUMMARY_PROMPT,
+    SUMMARY_SYSTEM_PROMPT,
     DifyMemoryPlugin,
     format_memories_for_system_prompt,
     parse_summary_json,
@@ -756,6 +758,75 @@ class TestDifyMemoryPlugin(unittest.IsolatedAsyncioTestCase):
         finally:
             server.shutdown()
             server.server_close()
+
+    async def test_custom_summary_prompt_and_constraint_append(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = FakeContextV4(
+                summary_reply='[{"content": "用户曾经夸奖过Bot非常聪明", "keywords": ["夸奖", "聪明"]}]'
+            )
+            # 1. 未配置、留空或等于 _conf_schema.json 默认值时，统一返回 SUMMARY_SYSTEM_PROMPT
+            schema_path = Path(__file__).resolve().parent.parent / "_conf_schema.json"
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
+            self.assertEqual(schema["summary_prompt"]["type"], "text")
+            self.assertEqual(schema["summary_prompt"]["default"], DEFAULT_SUMMARY_PROMPT)
+
+            plugin_default = DifyMemoryPlugin(context=ctx, config={}, data_dir=tmp)
+            default_sys = plugin_default._get_summary_system_prompt()
+            self.assertEqual(default_sys, SUMMARY_SYSTEM_PROMPT)
+            self.assertIn("互动印记", default_sys)
+            self.assertIn('"content"', default_sys)
+            self.assertIn('"keywords"', default_sys)
+
+            plugin_schema_default = DifyMemoryPlugin(
+                context=ctx,
+                config={"summary_prompt": schema["summary_prompt"]["default"]},
+                data_dir=tmp,
+            )
+            self.assertEqual(plugin_schema_default._get_summary_system_prompt(), SUMMARY_SYSTEM_PROMPT)
+
+            # 2. 自定义 summary_prompt 未写 JSON 示例时，底层自动追加 SUMMARY_JSON_FORMAT_CONSTRAINT
+            custom_rule = "请只提取用户的饮食禁忌与过敏原，忽略其他一切内容。"
+            plugin_custom = DifyMemoryPlugin(
+                context=ctx,
+                config={
+                    "dify_base_url": "https://api.dify.ai/v1",
+                    "dify_dataset_api_key": "dataset-key",
+                    "dify_dataset_id": "ds-id",
+                    "summary_prompt": custom_rule,
+                },
+                data_dir=tmp,
+            )
+            built_sys = plugin_custom._get_summary_system_prompt()
+            self.assertTrue(built_sys.startswith(custom_rule))
+            self.assertIn("必须且只能输出合法的 JSON 数组", built_sys)
+            self.assertIn('"content"', built_sys)
+            self.assertIn('"keywords"', built_sys)
+
+            # 3. 自然语言中提及 "content" 与 "keywords" 但不含数组括号时，仍自动追加 JSON 数组格式约束
+            prose_mention = '请重点提取 "content"（内容）和 "keywords"（关键词）相关的个人偏好。'
+            plugin_custom.config["summary_prompt"] = prose_mention
+            self.assertIn("必须且只能输出合法的 JSON 数组", plugin_custom._get_summary_system_prompt())
+
+            # 验证调用 _call_summary_llm 时确实将自定义 system_prompt 传给了大模型
+            plugin_custom.config["summary_prompt"] = custom_rule
+            await plugin_custom._call_summary_llm("测试对话内容", umo="qq:group:1")
+            self.assertEqual(ctx.calls[-1]["system_prompt"], built_sys)
+
+            # 4. 若用户在自定义 summary_prompt 中已经自行包含了 JSON 数组示例，则不重复追加
+            custom_with_json = (
+                '只记录用户的职业。请输出 JSON 数组：[{"content": "...", "keywords": ["..."]}]'
+            )
+            plugin_custom.config["summary_prompt"] = custom_with_json
+            self.assertEqual(plugin_custom._get_summary_system_prompt(), custom_with_json)
+
+            # 5. 若大模型在自定义提示词下输出了额外字段，parse_summary_json 仍能安全提取 content 与 keywords
+            parsed_extra = parse_summary_json(
+                '[{"content": "用户对花生过敏", "keywords": ["花生", "过敏"], "category": "diet", "importance": 5}]'
+            )
+            self.assertEqual(
+                parsed_extra,
+                [{"content": "用户对花生过敏", "keywords": ["花生", "过敏"]}],
+            )
 
 
 if __name__ == "__main__":

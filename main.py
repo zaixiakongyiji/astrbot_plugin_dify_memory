@@ -80,16 +80,23 @@ except ImportError:
     from dify_client import DifyAPIError, DifyDatasetClient, normalize_keywords  # type: ignore[no-redef]
     from storage import MemoryStorage  # type: ignore[no-redef]
 
-SUMMARY_SYSTEM_PROMPT = (
+DEFAULT_SUMMARY_PROMPT = (
     "你是一个专业的长期记忆提炼助手。你的任务是从用户与AI助手的多轮对话中，"
-    "提炼出关于该【用户】的有价值的长期事实、个人偏好、身份背景、长期计划或重要经历。\n"
+    "提炼出关于该【用户】的有价值的长期记忆。\n"
     "请严格遵守以下规则：\n"
-    "1. 只提取具有长期保留价值的用户画像、事实或偏好，忽略日常寒暄、单纯玩梗、临时指令或无意义的闲聊。\n"
+    "1. 提取具有长期保留价值的信息，包括：用户的个人事实、身份背景、兴趣偏好、重要经历，"
+    "以及用户对AI助手的态度与互动印记（例如明显的夸奖喜爱、冒犯辱骂、特殊称呼或双方达成的约定/暗号），"
+    "忽略无意义的日常寒暄或临时指令。\n"
     "2. 每条记忆必须独立成句、语义完整、客观准确，以“用户...”或明确的事实陈述开头。\n"
-    "3. 如果这批对话中没有任何值得长期记住的信息，请直接输出空数组 `[]`。\n"
-    "4. 必须且只能输出合法的 JSON 数组，不要输出任何额外解释文字。格式示例：\n"
+    "3. 如果这批对话中没有任何值得长期记住的信息，请直接输出空数组 `[]`。"
+)
+
+SUMMARY_JSON_FORMAT_CONSTRAINT = (
+    "必须且只能输出合法的 JSON 数组，不要输出任何额外解释文字。格式示例：\n"
     '[\n  {"content": "用户是一名Python后端工程师，日常使用FastAPI框架", "keywords": ["Python", "后端工程师", "FastAPI"]}\n]'
 )
+
+SUMMARY_SYSTEM_PROMPT = f"{DEFAULT_SUMMARY_PROMPT}\n4. {SUMMARY_JSON_FORMAT_CONSTRAINT}"
 
 CODE_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
 
@@ -195,7 +202,7 @@ def format_memories_for_system_prompt(memories: List[Dict[str, Any]]) -> str:
     "astrbot_plugin_dify_memory",
     "zaixiakongyiji",
     "基于 Dify 云端知识库的跨群用户级长期记忆插件",
-    "1.0.1",
+    "1.0.2",
     "https://github.com/zaixiakongyiji/astrbot_plugin_dify_memory",
 )
 class DifyMemoryPlugin(Star):
@@ -259,6 +266,20 @@ class DifyMemoryPlugin(Star):
                 return match.group(1).strip()
         return (fallback or "").strip()
 
+    def _get_summary_system_prompt(self) -> str:
+        """获取配置中的记忆提炼系统提示词，并确保末尾包含严格的 JSON 数组格式约束。"""
+        custom_prompt = str(self.config.get("summary_prompt") or "").strip()
+        if not custom_prompt or custom_prompt == DEFAULT_SUMMARY_PROMPT:
+            return SUMMARY_SYSTEM_PROMPT
+        if (
+            '"content"' in custom_prompt
+            and '"keywords"' in custom_prompt
+            and "[" in custom_prompt
+            and "]" in custom_prompt
+        ):
+            return custom_prompt
+        return f"{custom_prompt}\n\n{SUMMARY_JSON_FORMAT_CONSTRAINT}"
+
     async def _call_summary_llm(self, prompt: str, umo: Optional[str] = None) -> str:
         """
         调用 AstrBot 已配置的模型提供商执行对话总结：
@@ -268,6 +289,7 @@ class DifyMemoryPlugin(Star):
         """
         configured_provider_id = str(self.config.get("summary_provider_id") or "").strip()
         provider_id = configured_provider_id
+        system_prompt = self._get_summary_system_prompt()
 
         # 1. 尝试新版 AstrBot v4 context.llm_generate 接口
         if hasattr(self.context, "llm_generate"):
@@ -284,10 +306,10 @@ class DifyMemoryPlugin(Star):
                     llm_resp = await self.context.llm_generate(
                         chat_provider_id=provider_id,
                         prompt=prompt,
-                        system_prompt=SUMMARY_SYSTEM_PROMPT,
+                        system_prompt=system_prompt,
                     )
                 except TypeError:
-                    combined_prompt = f"{SUMMARY_SYSTEM_PROMPT}\n\n{prompt}"
+                    combined_prompt = f"{system_prompt}\n\n{prompt}"
                     llm_resp = await self.context.llm_generate(
                         chat_provider_id=provider_id,
                         prompt=combined_prompt,
@@ -318,10 +340,10 @@ class DifyMemoryPlugin(Star):
         try:
             llm_resp = await provider.text_chat(
                 prompt=prompt,
-                system_prompt=SUMMARY_SYSTEM_PROMPT,
+                system_prompt=system_prompt,
             )
         except TypeError:
-            llm_resp = await provider.text_chat(f"{SUMMARY_SYSTEM_PROMPT}\n\n{prompt}")
+            llm_resp = await provider.text_chat(f"{system_prompt}\n\n{prompt}")
 
         completion = getattr(llm_resp, "completion_text", "") if llm_resp else ""
         if not completion and hasattr(llm_resp, "result_chain") and llm_resp.result_chain:
